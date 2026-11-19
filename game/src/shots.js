@@ -1,79 +1,79 @@
-// The screenshot scenes behind ?shot=start|play|end. Each one plays the real rules forward from a
-// fresh world for a fixed number of steps, steered by a simple autopilot (look ahead each way the
-// paddle could move, keep clear of blocks, chase the lowest coin when that is safe), so the frame
-// is what a short game really looks like and the same seed always gives the same frame.
-import { FIELD, PLAYER, STEP } from './config.js';
-import { EVENT_OVER, KIND_BLOCK } from './world.js';
-import { SCREEN_OVER, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
+// shots.js — the screenshot director. With ?shot=<name>&seed=7 the game
+// boots straight past the menu into a staged, deterministic scene, and
+// main.js sets window.__shotReady once it has rendered. Each scene uses
+// the real systems (traffic, police, missions) so the frame is honest
+// gameplay, just arranged:
+//
+//   cover   — hero shot: the player beside a sports car on the coast road,
+//             city skyline behind, golden-hour light.
+//   chase   — the player driving with two police cars in pursuit, 3 stars.
+//   foot    — on foot in a busy street: pedestrians, traffic, minimap.
+//   mission — mission 1 live: objective pillar on the target car, banner up.
 
-const START_SECONDS = 5;
-const PLAY_SECONDS = 26;
-const END_LIMIT_SECONDS = 600;
-/**
- * How far ahead, in seconds, the autopilot checks each way it could move: the play scene's pilot
- * looks well ahead and keeps all its lives; the end scene's looks only a moment ahead, so it is
- * caught out once the blocks speed up, as a hurried player is.
- */
-const HORIZON_PLAY = 0.7;
-const HORIZON_END = 0.25;
-const SAMPLE = 1 / 30;
-const DIRECTIONS = [0, -1, 1];
-/** Extra room, each side, it keeps between the paddle and a block. */
-const MARGIN = 10;
+import * as THREE from 'three';
+import { makeCar } from './vehicles.js';
+import { showBanner, showPhone } from './hud.js';
 
-/** Seconds until moving in `direction` (-1, 0, 1) runs the paddle into a block; Infinity when it never does. */
-function timeToHit(state, direction, horizon) {
-  const player = state.player;
-  for (let t = SAMPLE; t <= horizon; t += SAMPLE) {
-    const x = Math.min(FIELD.width - player.width, Math.max(0, player.x + direction * PLAYER.speed * t));
-    for (let index = 0; index < state.items.length; index += 1) {
-      const item = state.items[index];
-      if (!item.active || item.kind !== KIND_BLOCK) continue;
-      const y = item.y + item.speed * t;
-      if (y + item.height > player.y && y < player.y + player.height && item.x < x + player.width + MARGIN && item.x + item.width > x - MARGIN) return t;
+export function setupShot(G, name) {
+  const P = G.player;
+  if (name === 'cover') {
+    // Staged on the casino lot paving (off the traffic lanes, so passing
+    // cars cannot wander into the hero frame), angled toward the skyline.
+    const car = makeCar(G, { style: 'sport', color: 0xd63031, kind: 'parked', x: 237.5, z: 129.5, heading: 0.8 });
+    P.group.position.set(235.4, 0, 132.6);
+    P.heading = -0.9;
+    P.group.rotation.y = P.heading;
+    G.camYaw = 2.2;
+    G.shotCam = { pos: new THREE.Vector3(243.2, 2.6, 138.8), look: new THREE.Vector3(236.5, 1.2, 129) };
+    return;
+  }
+
+  if (name === 'chase') {
+    const car = makeCar(G, { style: 'sedan', color: 0x0984e3, kind: 'traffic', x: -23.4, z: -30, heading: 0 });
+    car.speed = 15;
+    car.driver = 'player';
+    P.inCar = car;
+    P.health = 100000;               // the shot must not end in a wasted screen
+    const cop1 = makeCar(G, { style: 'police', color: 0xf2f4f6, kind: 'police', x: -25.6, z: -48, heading: 0 });
+    cop1.speed = 15.5; cop1.maxSpeed = 37.5;
+    cop1.police = { officer: null, shootCd: 99, side: 1 };
+    const cop2 = makeCar(G, { style: 'police', color: 0xf2f4f6, kind: 'police', x: -19.8, z: -60, heading: 0 });
+    cop2.speed = 16; cop2.maxSpeed = 37.5;
+    cop2.police = { officer: null, shootCd: 99, side: -1 };
+    G.wanted.stars = 3;
+    G.wanted.lastSeenAt = 0;
+    G.shotDrive = car;               // main keeps this car rolling north
+    G.shotFollow = true;             // camera rides with it…
+    G.shotCamFront = true;           // …from the front, so the cops show
+    return;
+  }
+
+  if (name === 'foot') {
+    P.group.position.set(-13.5, 0, -6);
+    P.heading = 2.75;
+    P.group.rotation.y = P.heading;
+    // Pull a crowd onto this block so the street feels lived-in.
+    let moved = 0;
+    for (const ped of G.peds) {
+      if (ped.role !== 'civilian' || moved >= 7) continue;
+      ped.group.position.set(-26 + moved * 2.6, 0, -13 + (moved % 3) * 5.5);
+      moved++;
     }
+    G.shotCam = { pos: new THREE.Vector3(-8.2, 3.1, 1.8), look: new THREE.Vector3(-14.5, 1.1, -7) };
+    return;
   }
-  return Infinity;
-}
 
-/** Of the safe ways to move, the one toward the lowest coin (or the centre); else the one that is hit last. */
-function autopilot(state, horizon) {
-  const player = state.player;
-  let coin = null;
-  for (let index = 0; index < state.items.length; index += 1) {
-    const item = state.items[index];
-    if (item.active && item.kind !== KIND_BLOCK && (coin === null || item.y > coin.y)) coin = item;
-  }
-  const target = coin === null ? FIELD.width / 2 : coin.x + coin.width / 2;
-  const centre = player.x + player.width / 2;
-  const wanted = target > centre + 8 ? 1 : target < centre - 8 ? -1 : 0;
-  let best = wanted;
-  let bestTime = timeToHit(state, wanted, horizon);
-  for (let index = 0; index < DIRECTIONS.length && bestTime !== Infinity; index += 1) {
-    const time = timeToHit(state, DIRECTIONS[index], horizon);
-    if (time > bestTime) {
-      bestTime = time;
-      best = DIRECTIONS[index];
-    }
-  }
-  return best;
-}
-
-/**
- * Set `world` to the named scene (start, play or end; any other name is start) and return the
- * screen to draw over it and the best score to show.
- */
-export function stageShot(name, world) {
-  world.reset();
-  if (name !== 'play' && name !== 'end') {
-    for (let index = 0; index < START_SECONDS / STEP; index += 1) world.step(STEP, 0, true);
-    return { screen: SCREEN_TITLE, best: 0 };
-  }
-  const limit = name === 'end' ? END_LIMIT_SECONDS : PLAY_SECONDS;
-  const horizon = name === 'end' ? HORIZON_END : HORIZON_PLAY;
-  for (let index = 0; index < limit / STEP; index += 1) {
-    if (world.step(STEP, autopilot(world.state, horizon), false) & EVENT_OVER) break;
-  }
-  const over = world.state.lives === 0;
-  return { screen: over ? SCREEN_OVER : SCREEN_PLAY, best: world.state.score };
+  // mission (and any unknown name): mission 1, target car in frame.
+  const car = G.missionCar;
+  P.group.position.set(car.group.position.x - 5.5, 0, car.group.position.z + 7.5);
+  P.heading = Math.atan2(car.group.position.x - P.group.position.x, car.group.position.z - P.group.position.z);
+  P.group.rotation.y = P.heading;
+  G.shotCam = {
+    pos: new THREE.Vector3(car.group.position.x - 11, 3.6, car.group.position.z + 13),
+    look: new THREE.Vector3(car.group.position.x, 1.6, car.group.position.z),
+  };
+  // Re-issue the intro with long durations: the screenshot may be taken
+  // many (virtual) seconds after boot, past a normal banner's lifetime.
+  showBanner('FIRST WHEELS', 'A job from Marina Sol', 60000);
+  showPhone('Marina Sol', 'There is an orange Comet parked on the 60-street with your name on it. Take it, bring it to my garage at the docks.', 60000);
 }

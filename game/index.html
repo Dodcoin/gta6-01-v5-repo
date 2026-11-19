@@ -3,17 +3,128 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Block Dodger</title>
+<title>Costa Serena — a 3D open-world crime game</title>
 <style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #11141b; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #1a1210; font-family: "Avenir Next", "Segoe UI", system-ui, sans-serif; }
   #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
-  /* Read aloud, never shown: the status line screen readers announce. */
-  #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+  /* ---------- HUD ---------- */
+  #hud { position: fixed; inset: 0; pointer-events: none; display: none; z-index: 5; }
+  #topleft { position: absolute; top: 16px; left: 16px; }
+  #minimap { width: 184px; height: 184px; display: block; }
+  #healthwrap { margin-top: 8px; width: 184px; height: 13px; background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.4); border-radius: 7px; overflow: hidden; }
+  #healthfill { height: 100%; width: 100%; background: linear-gradient(90deg,#37d67a,#7bed9f); transition: width .18s; }
+  #topright { position: absolute; top: 14px; right: 20px; text-align: right; color: #fff; text-shadow: 0 2px 6px rgba(0,0,0,.7); }
+  #cash { font-size: 30px; font-weight: 800; letter-spacing: .5px; color: #ffe27a; }
+  #stars { font-size: 24px; letter-spacing: 3px; color: #ffd23f; margin-top: 2px; }
+  #speed { font-size: 17px; font-weight: 700; color: #eaf6ff; margin-top: 4px; display: none; }
+  #objective { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); max-width: 560px; padding: 9px 18px;
+    background: rgba(10,14,20,.62); border: 1px solid rgba(255,210,63,.55); border-radius: 10px; color: #ffe9a8;
+    font-size: 16.5px; font-weight: 600; text-align: center; display: none; }
+  #timer { position: absolute; top: 74px; left: 50%; transform: translateX(-50%); font-size: 25px; font-weight: 800; color: #ffd76e; text-shadow: 0 2px 6px rgba(0,0,0,.8); display: none; }
+  #prompt { position: absolute; bottom: 108px; left: 50%; transform: translateX(-50%); padding: 8px 16px; background: rgba(10,14,20,.66);
+    border-radius: 8px; color: #fff; font-size: 16px; font-weight: 600; display: none; }
+  #crosshair { position: absolute; top: 50%; left: 50%; width: 22px; height: 22px; transform: translate(-50%,-50%); display: none; }
+  #crosshair::before, #crosshair::after { content: ""; position: absolute; background: rgba(255,255,255,.92); box-shadow: 0 0 4px rgba(0,0,0,.8); }
+  #crosshair::before { left: 50%; top: 0; width: 2px; height: 100%; transform: translateX(-50%); }
+  #crosshair::after { top: 50%; left: 0; height: 2px; width: 100%; transform: translateY(-50%); }
+  #bustedwrap { position: absolute; bottom: 150px; left: 50%; transform: translateX(-50%); width: 300px; display: none; text-align: center;
+    color: #7db4ff; font-weight: 800; letter-spacing: 3px; font-size: 15px; text-shadow: 0 2px 5px #000; }
+  #bustedbar { height: 10px; background: rgba(0,0,0,.55); border: 1px solid rgba(125,180,255,.7); border-radius: 6px; overflow: hidden; margin-top: 5px; }
+  #bustedfill { height: 100%; width: 0%; background: linear-gradient(90deg,#2f6fd0,#7db4ff); }
+  #hint { position: absolute; bottom: 12px; right: 16px; color: rgba(255,255,255,.65); font-size: 12.5px; text-shadow: 0 1px 3px #000; text-align: right; line-height: 1.5; }
+
+  /* Banner + phone */
+  #banner { position: absolute; top: 24%; left: 50%; transform: translate(-50%,-50%) scale(.96); text-align: center; opacity: 0; transition: opacity .3s, transform .3s; }
+  #banner.show { opacity: 1; transform: translate(-50%,-50%) scale(1); }
+  #banner-title { font-size: 46px; font-weight: 900; letter-spacing: 4px; color: #ffd23f; text-shadow: 0 3px 0 #b3541e, 0 6px 18px rgba(0,0,0,.65); }
+  #banner-sub { font-size: 19px; color: #fff; font-weight: 600; text-shadow: 0 2px 8px rgba(0,0,0,.8); margin-top: 4px; }
+  #phone { position: absolute; right: 18px; bottom: 86px; width: 292px; background: rgba(12,16,22,.88); border: 1px solid rgba(255,255,255,.22);
+    border-radius: 14px; padding: 11px 14px; color: #eef3f7; opacity: 0; transform: translateY(12px); transition: opacity .3s, transform .3s; }
+  #phone.show { opacity: 1; transform: translateY(0); }
+  #phone-from { font-size: 12.5px; font-weight: 800; letter-spacing: 1px; color: #7bed9f; text-transform: uppercase; margin-bottom: 3px; }
+  #phone-text { font-size: 14px; line-height: 1.45; }
+
+  /* ---------- Screens ---------- */
+  .screen { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10;
+    background: radial-gradient(ellipse at 50% 120%, rgba(255,140,60,.30), rgba(16,10,14,.82) 62%); color: #fff; text-align: center; padding: 20px; }
+  .screen h1 { font-size: 74px; margin: 0; font-weight: 900; letter-spacing: 7px; color: #ffd23f; text-shadow: 0 4px 0 #b3541e, 0 10px 30px rgba(0,0,0,.7); }
+  .screen h2 { font-size: 52px; margin: 0 0 8px; font-weight: 900; letter-spacing: 5px; }
+  .tagline { font-size: 19px; color: #ffe9c9; max-width: 640px; line-height: 1.55; margin: 12px 0 4px; text-shadow: 0 2px 6px rgba(0,0,0,.8); }
+  .controls { display: grid; grid-template-columns: auto auto; gap: 3px 16px; margin: 18px 0 22px; font-size: 15px; color: #dfe9f2; text-align: left; }
+  .controls b { color: #ffd76e; text-align: right; font-weight: 700; }
+  .btn { pointer-events: auto; cursor: pointer; border: none; border-radius: 10px; padding: 13px 42px; margin: 5px;
+    font-size: 19px; font-weight: 800; letter-spacing: 1px; background: linear-gradient(180deg,#ffb03a,#f07f13); color: #231303;
+    box-shadow: 0 6px 18px rgba(0,0,0,.5); }
+  .btn:hover { filter: brightness(1.1); }
+  .btn.ghost { background: rgba(255,255,255,.14); color: #fff; border: 1px solid rgba(255,255,255,.4); }
+  #save-note { color: #a8e6b0; font-size: 14.5px; min-height: 20px; }
+  #end-screen { display: none; }
+  #pause-screen { display: none; }
+  #end-title.busted { color: #7db4ff; } #end-title.wasted { color: #ff6b6b; }
 </style>
 </head>
 <body>
-<canvas id="game" aria-label="Block Dodger: move the paddle left and right to dodge falling blocks and catch coins"></canvas>
-<p id="status" role="status" aria-live="polite"></p>
+<canvas id="game" aria-label="Costa Serena: a 3D open-world crime game"></canvas>
+
+<div id="hud">
+  <div id="topleft">
+    <canvas id="minimap" width="184" height="184"></canvas>
+    <div id="healthwrap"><div id="healthfill"></div></div>
+  </div>
+  <div id="topright">
+    <div id="cash">$0</div>
+    <div id="stars">☆☆☆☆☆</div>
+    <div id="speed"></div>
+  </div>
+  <div id="objective"></div>
+  <div id="timer"></div>
+  <div id="banner"><div id="banner-title"></div><div id="banner-sub"></div></div>
+  <div id="bustedwrap">BUSTED<div id="bustedbar"><div id="bustedfill"></div></div></div>
+  <div id="prompt"></div>
+  <div id="crosshair"></div>
+  <div id="phone"><div id="phone-from"></div><div id="phone-text"></div></div>
+  <div id="hint">WASD move · Shift run · E car · RMB aim · Click/F shoot<br>P pause · M mute · G side gig</div>
+</div>
+
+<div id="start-screen" class="screen">
+  <h1>COSTA SERENA</h1>
+  <p class="tagline">A sun-soaked island city, one borrowed sports car, and a fixer named
+  <b>Marina Sol</b> who always needs one more favour. Steal, deliver, shoot and outrun the
+  Serena PD through a four-job story — then keep the money moving with side gigs.</p>
+  <div class="controls">
+    <b>W A S D</b><span>Move / drive</span>
+    <b>Mouse</b><span>Orbit camera (click the game to lock)</span>
+    <b>Shift</b><span>Run</span>
+    <b>E</b><span>Enter / exit car</span>
+    <b>Right mouse</b><span>Aim pistol</span>
+    <b>Click or F</b><span>Shoot</span>
+    <b>Space</b><span>Handbrake</span>
+    <b>G</b><span>Take a side gig (when offered)</span>
+    <b>P / Esc</b><span>Pause</span>
+    <b>M</b><span>Mute</span>
+  </div>
+  <div id="save-note"></div>
+  <button id="btn-continue" class="btn" style="display:none">CONTINUE</button>
+  <button id="btn-start" class="btn">NEW GAME</button>
+</div>
+
+<div id="pause-screen" class="screen">
+  <h2>PAUSED</h2>
+  <p class="tagline">The city holds its breath.</p>
+  <button id="btn-resume" class="btn">RESUME</button>
+  <button id="btn-menu" class="btn ghost">TITLE SCREEN</button>
+</div>
+
+<div id="end-screen" class="screen">
+  <h2 id="end-title">BUSTED</h2>
+  <p class="tagline" id="end-text"></p>
+  <button id="btn-respawn" class="btn">Step out</button>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.min.js" } }
+</script>
 <script type="module" src="./src/main.js"></script>
 </body>
 </html>

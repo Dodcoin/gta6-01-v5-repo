@@ -1,53 +1,77 @@
-// Keyboard and pointer input. Held keys give a steering direction; one-shot presses (start or
-// restart, pause) are queued as bit flags and taken once by the loop, so a press between two
-// frames is never lost and never counted twice.
+// input.js — keyboard + mouse state for Costa Serena.
+//
+// One shared `input` object is mutated by DOM listeners; the game loop reads
+// it every frame. `down` holds the codes currently held, `pressed` holds the
+// codes that went down since the last frame (the main loop clears it via
+// postUpdate() at the end of each frame, which gives us clean edge triggers
+// for things like "press E to enter the car" without any event plumbing in
+// the gameplay modules).
 
-export const ACTION_CONFIRM = 1;
-export const ACTION_PAUSE = 2;
+export const input = {
+  down: new Set(),
+  pressed: new Set(),
+  mouseDX: 0,
+  mouseDY: 0,
+  lmb: false,
+  rmb: false,
+  locked: false,
+};
 
-const LEFT = new Set(['ArrowLeft', 'KeyA']);
-const RIGHT = new Set(['ArrowRight', 'KeyD']);
-const CONFIRM = new Set(['Space', 'Enter']);
-const PAUSE = new Set(['KeyP', 'Escape']);
+let targetEl = null;
 
-export function createInput(target) {
-  let left = false;
-  let right = false;
-  let actions = 0;
-
-  window.addEventListener('keydown', (event) => {
-    if (LEFT.has(event.code)) left = true;
-    else if (RIGHT.has(event.code)) right = true;
-    else if (CONFIRM.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_CONFIRM;
-    } else if (PAUSE.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_PAUSE;
-    } else return;
-    event.preventDefault();
+export function initInput(canvas) {
+  targetEl = canvas;
+  window.addEventListener('keydown', (e) => {
+    if (!e.repeat) input.pressed.add(e.code);
+    input.down.add(e.code);
+    // Keep the page from scrolling on the keys the game uses.
+    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
   });
-  window.addEventListener('keyup', (event) => {
-    if (LEFT.has(event.code)) left = false;
-    else if (RIGHT.has(event.code)) right = false;
-  });
-  // A key released while the tab is hidden never sends keyup: let go of everything on blur.
-  window.addEventListener('blur', () => {
-    left = false;
-    right = false;
-  });
-  target.addEventListener('pointerdown', () => {
-    actions |= ACTION_CONFIRM;
-  });
+  window.addEventListener('keyup', (e) => input.down.delete(e.code));
+  window.addEventListener('blur', () => { input.down.clear(); input.lmb = false; input.rmb = false; });
 
-  return {
-    /** -1 for left, 1 for right, 0 for neither or both. */
-    direction() {
-      return (right ? 1 : 0) - (left ? 1 : 0);
-    },
-    /** The one-shot presses since the last call, as ACTION_* flags. */
-    takeActions() {
-      const taken = actions;
-      actions = 0;
-      return taken;
-    },
-  };
+  document.addEventListener('pointerlockchange', () => {
+    input.locked = document.pointerLockElement === canvas;
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!input.locked) return;
+    input.mouseDX += e.movementX || 0;
+    input.mouseDY += e.movementY || 0;
+  });
+  canvas.addEventListener('mousedown', (e) => {
+    if (e.button === 0) input.lmb = true;
+    if (e.button === 2) input.rmb = true;
+  });
+  window.addEventListener('mouseup', (e) => {
+    if (e.button === 0) input.lmb = false;
+    if (e.button === 2) input.rmb = false;
+  });
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 }
+
+export function lockPointer() {
+  if (targetEl && document.pointerLockElement !== targetEl) {
+    try {
+      const p = targetEl.requestPointerLock();
+      if (p && p.catch) p.catch(() => { /* headless / denied: game still runs */ });
+    } catch { /* pointer lock unavailable: mouse-look just stays off */ }
+  }
+}
+
+export function unlockPointer() {
+  if (document.pointerLockElement) document.exitPointerLock();
+}
+
+// Consume the accumulated mouse movement (called once per frame by main).
+export function takeMouse() {
+  const dx = input.mouseDX, dy = input.mouseDY;
+  input.mouseDX = 0; input.mouseDY = 0;
+  return { dx, dy };
+}
+
+export function postUpdate() {
+  input.pressed.clear();
+}
+
+export function key(code) { return input.down.has(code); }
+export function hit(code) { return input.pressed.has(code); }
